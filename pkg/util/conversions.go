@@ -47,10 +47,11 @@ func TrimPod(pod *corev1.Pod, ignoreLabels []string) *corev1.Pod {
 	podCopy.Labels[VirtualPodLabel] = "true"
 	cns := ConvertAnnotations(pod.Annotations)
 	recoverSelectors(podCopy, cns)
-	podCopy.Spec.Containers = trimContainers(pod.Spec.Containers)
-	podCopy.Spec.InitContainers = trimContainers(pod.Spec.InitContainers)
+	podCopy.Spec.Containers = trimContainersAndVolumes(pod.Spec.Containers, &vols)
+	podCopy.Spec.InitContainers = trimContainersAndVolumes(pod.Spec.InitContainers, &vols)
 	podCopy.Spec.Volumes = vols
 	podCopy.Spec.NodeName = ""
+	podCopy.Spec.SchedulerName = "default-scheduler"
 	podCopy.Status = corev1.PodStatus{}
 	// remove labels should be removed, which would influence schedule in client cluster
 	tripped := trimLabels(podCopy.ObjectMeta.Labels, ignoreLabels)
@@ -81,6 +82,32 @@ func trimContainers(containers []corev1.Container) []corev1.Container {
 		newContainers = append(newContainers, c)
 	}
 
+	return newContainers
+}
+
+func trimContainersAndVolumes(containers []corev1.Container, vols *[]corev1.Volume) []corev1.Container {
+	var newContainers []corev1.Container
+
+	for _, c := range containers {
+		var volMounts []corev1.VolumeMount
+		for _, v := range c.VolumeMounts {
+			if strings.HasPrefix(v.Name, "default-token") {
+				continue
+			}
+			if v.MountPath == "/var/run/secrets/kubernetes.io/serviceaccount" {
+				for i, vv := range *vols {
+					if vv.Name == v.Name {
+						*vols = append((*vols)[:i], (*vols)[i+1:]...)
+						break
+					}
+				}
+				continue
+			}
+			volMounts = append(volMounts, v)
+		}
+		c.VolumeMounts = volMounts
+		newContainers = append(newContainers, c)
+	}
 	return newContainers
 }
 
