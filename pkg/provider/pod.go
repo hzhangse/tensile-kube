@@ -23,10 +23,14 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/virtual-kubelet/tensile-kube/pkg/controllers"
+	"github.com/virtual-kubelet/tensile-kube/pkg/util"
 	"github.com/virtual-kubelet/virtual-kubelet/errdefs"
 	"github.com/virtual-kubelet/virtual-kubelet/node"
 	"github.com/virtual-kubelet/virtual-kubelet/node/api"
+
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -34,9 +38,6 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/klog"
-
-	"github.com/virtual-kubelet/tensile-kube/pkg/controllers"
-	"github.com/virtual-kubelet/tensile-kube/pkg/util"
 )
 
 var _ node.PodLifecycleHandler = &VirtualK8S{}
@@ -357,6 +358,7 @@ func (v *VirtualK8S) createSecrets(ctx context.Context, secrets []string, ns str
 				klog.Error(err)
 				return err
 			}
+			return nil
 		}
 		controllers.SetObjectGlobal(&secret.ObjectMeta)
 		_, err = v.client.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{})
@@ -406,6 +408,13 @@ func (v *VirtualK8S) createServiceAccount(ctx context.Context, secret *corev1.Se
 		klog.Infof("get secret serviceAccount info: [%s] [%v] [%v] [%v]",
 			sa.Name, sa.CreationTimestamp, sa.Annotations, sa.UID)
 	}
+
+	err = v.createRolesForServiceAccount(ctx, accountName, ns)
+	if err != nil {
+		return err
+	}
+
+	/***
 	secret.UID = sa.UID
 	secret.Annotations[corev1.ServiceAccountNameKey] = accountName
 	secret.Annotations[corev1.ServiceAccountUIDKey] = string(sa.UID)
@@ -423,6 +432,77 @@ func (v *VirtualK8S) createServiceAccount(ctx context.Context, secret *corev1.Se
 		klog.Infof(
 			"update serviceAccount [%v] err: [%v]]",
 			sa, err)
+		return err
+	}
+	***/
+	return nil
+}
+
+// create role,role-binding related to sa
+func (v *VirtualK8S) createRolesForServiceAccount(ctx context.Context, accountName string, ns string) error {
+	rolebindings, err := v.master.RbacV1().RoleBindings(ns).List(ctx, metav1.ListOptions{})
+	if err == nil {
+		for _, item := range rolebindings.Items {
+			for _, subject := range item.Subjects {
+				if subject.Name == accountName {
+					//deal with role
+					roleName := item.RoleRef.Name
+					role, err := v.master.RbacV1().Roles(ns).Get(ctx, roleName, metav1.GetOptions{})
+					if err == nil {
+						_, err := v.client.RbacV1().Roles(ns).Get(ctx, roleName, metav1.GetOptions{})
+						if err != nil {
+							if errors.IsNotFound(err) {
+								roleNew := &rbacv1.Role{}
+								klog.Infof("start to create a new Role ", "Role.Namespace", ns, "Role.Name", roleName)
+								roleNew.ObjectMeta.Namespace = ns
+								roleNew.ObjectMeta.Name = role.ObjectMeta.Name
+								roleNew.ObjectMeta.Labels = role.ObjectMeta.Labels
+								roleNew.ObjectMeta.Annotations = role.ObjectMeta.Annotations
+								roleNew.ObjectMeta.Labels = role.ObjectMeta.Labels
+								roleNew.Rules = role.Rules
+								_, err := v.client.RbacV1().Roles(ns).Create(ctx, roleNew, metav1.CreateOptions{})
+								if err != nil {
+									klog.Error(err, "Failed to create a new Role ", "Role.Namespace", ns, "Role.Name", roleName)
+									return err
+								}
+								klog.Info("create a new Role successfully", "Role.Namespace", ns, "Role.Name", roleName)
+							}
+						}
+					}
+					//deal with rb
+					rbName := item.Name
+					_, err = v.client.RbacV1().RoleBindings(ns).Get(ctx, rbName, metav1.GetOptions{})
+					if err != nil {
+						if errors.IsNotFound(err) {
+							rolebindingNew := &rbacv1.RoleBinding{}
+							rolebindingNew.ObjectMeta.Name = rbName
+							rolebindingNew.ObjectMeta.Namespace = ns
+							subjects := []rbacv1.Subject{}
+							subjects = append(subjects,
+								rbacv1.Subject{
+									Kind:      "ServiceAccount",
+									Name:      accountName,
+									Namespace: ns})
+							rolebindingNew.Subjects = subjects
+
+							rolebindingNew.RoleRef.APIGroup = "rbac.authorization.k8s.io"
+							rolebindingNew.RoleRef.Kind = "Role"
+							rolebindingNew.RoleRef.Name = roleName
+
+							klog.Info("start to create a new RoleBinding ", "RoleBinding.Namespace", ns, "RoleBinding.Name", rbName)
+							_, err = v.client.RbacV1().RoleBindings(ns).Create(ctx, rolebindingNew, metav1.CreateOptions{})
+							if err != nil {
+								klog.Error(err, "Failed to create a new RoleBinding ", "RoleBinding.Namespace", ns, "RoleBinding.Name", rbName)
+								return err
+							}
+							klog.Info(" create a new RoleBinding successfully", "RoleBinding.Namespace", ns, "RoleBinding.Name", rbName)
+						}
+					}
+				}
+			}
+		}
+	} else {
+		klog.Error(err, "Failed to List master cluster RoleBinding ", "RoleBinding.Namespace", ns)
 		return err
 	}
 	return nil
