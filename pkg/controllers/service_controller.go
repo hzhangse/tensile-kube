@@ -180,11 +180,25 @@ func (ctrl *ServiceController) endpointsAdded(obj interface{}) {
 	}
 }
 
+func isSparkDriverEndpoint(endpoint v1.Endpoints) bool {
+	subsets := endpoint.Subsets
+	for _, subset := range subsets {
+		for _, port := range subset.Ports {
+			name := port.Name
+			if name == "blockmanager" || name == "spark-ui" || name == "driver-rpc-port" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // endpointsUpdated reacts to a Endpoints update
 func (ctrl *ServiceController) endpointsUpdated(old, new interface{}) {
-
 	newEndpoints := new.(*v1.Endpoints)
-	if ctrl.shouldEnqueue(&newEndpoints.ObjectMeta) && IsObjectGlobal(&newEndpoints.ObjectMeta) {
+	// 通过endponit的端口名判断是否是一个spark driver svc endpoint,如果是则对client cluster进行endpoint同步
+	if ctrl.shouldEnqueue(&newEndpoints.ObjectMeta) && (IsObjectGlobal(&newEndpoints.ObjectMeta) ||
+		isSparkDriverEndpoint(*newEndpoints)) {
 		key, err := cache.MetaNamespaceKeyFunc(new)
 		if err != nil {
 			runtime.HandleError(err)
