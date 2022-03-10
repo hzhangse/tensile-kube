@@ -15,7 +15,7 @@
 #
 
 
-REGISTRY_NAME=xxxx
+REGISTRY_NAME=registry.cn-shanghai.aliyuncs.com/kyligence
 GIT_COMMIT=$(shell git rev-parse "HEAD^{commit}")
 VERSION=$(shell git describe --tags --abbrev=14 "${GIT_COMMIT}^{commit}" --always)
 BUILD_TIME=$(shell TZ=Asia/Shanghai date +%FT%T%z)
@@ -55,7 +55,9 @@ container-descheduler: descheduler
 	docker build -t $(REGISTRY_NAME)/descheduler:$(VERSION) -f $(shell if [ -e ./cmd/$*/Dockerfile ]; then echo ./cmd/$*/Dockerfile; else echo Dockerfile.descheduler; fi) --label revision=$(REV) .
 
 push: container
-	docker push $(REGISTRY_NAME)/virtual-k8s:$(VERSION)
+	docker push $(REGISTRY_NAME)/virtual-node:$(VERSION)
+	docker push $(REGISTRY_NAME)/virtual-webhook:$(VERSION)
+	docker push $(REGISTRY_NAME)/descheduler:$(VERSION)
 
 test:
 	go test -count=1 ./pkg/...
