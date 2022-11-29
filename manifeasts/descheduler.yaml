@@ -92,7 +92,7 @@ spec:
       priorityClassName: system-cluster-critical
       containers:
         - name: descheduler
-          image: descheduler:v1.0.0
+          image: registry.cn-shanghai.aliyuncs.com/kyligence/descheduler:v0.1.1-24-g2bd91c26b8c98c
           volumeMounts:
             - mountPath: /policy-dir
               name: policy-volume

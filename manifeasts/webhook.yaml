@@ -1,16 +1,39 @@
-apiVersion: admissionregistration.k8s.io/v1beta1
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: selfsigned-issuer
+  namespace: kube-system
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wbssecret
+  namespace: kube-system
+spec:
+  dnsNames:
+  - vk-mutator.kube-system.svc
+  - vk-mutator.kube-system.svc.cluster.local
+  issuerRef:
+    kind: Issuer
+    name: selfsigned-issuer
+  secretName: wbssecret
+---
+apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
   name: vk-mutator
+  annotations:
+    cert-manager.io/inject-ca-from: kube-system/wbssecret
 webhooks:
   - clientConfig:
-      caBundle: ${caBundle}
       service:
         name: vk-mutator
         namespace: kube-system
         path: /mutate
     failurePolicy: Fail
-    name: xxx
+    name: vk-mutator.kube-system.svc
     rules:
       - apiGroups:
           - ""
@@ -21,6 +44,9 @@ webhooks:
         resources:
           - pods
     sideEffects: None
+    admissionReviewVersions: 
+      - v1
+      - v1beta
 ---
 apiVersion: v1
 data:
@@ -49,12 +75,12 @@ spec:
   sessionAffinity: None
   type: ClusterIP
 ---
-apiVersion: extensions/v1beta1
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   labels:
     app: vk-mutator
-  name: webhook
+  name: vk-webhook
   namespace: kube-system
 spec:
   progressDeadlineSeconds: 600
@@ -74,11 +100,11 @@ spec:
     spec:
       containers:
         - args:
-            - --tlscert=/root/cert.pem
-            - --tlskey=/root/key.pem
+            - --tlscert=/root/tls.crt
+            - --tlskey=/root/tls.key
             - --port=443
             - --v=6
-          image: virtual-webhook:v1.0.0
+          image: registry.cn-shanghai.aliyuncs.com/kyligence/virtual-webhook:v0.1.1-24-g2bd91c26b8c98c
           imagePullPolicy: Always
           name: webhook
           ports:
@@ -91,13 +117,14 @@ spec:
             - mountPath: /root
               name: wbssecret
       dnsPolicy: ClusterFirst
+      serviceAccount: virtual-kubelet
       volumes:
         - name: wbssecret
           secret:
             defaultMode: 420
             items:
-              - key: key.pem
-                path: key.pem
-              - key: cert.pem
-                path: cert.pem
+              - key: tls.key
+                path: tls.key
+              - key: tls.crt
+                path: tls.crt
             secretName: wbssecret
