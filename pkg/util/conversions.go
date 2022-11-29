@@ -47,8 +47,8 @@ func TrimPod(pod *corev1.Pod, ignoreLabels []string) *corev1.Pod {
 	podCopy.Labels[VirtualPodLabel] = "true"
 	cns := ConvertAnnotations(pod.Annotations)
 	recoverSelectors(podCopy, cns)
-	podCopy.Spec.Containers = trimContainersAndVolumes(pod.Spec.Containers, &vols)
-	podCopy.Spec.InitContainers = trimContainersAndVolumes(pod.Spec.InitContainers, &vols)
+	podCopy.Spec.Containers = trimContainers(pod.Spec.Containers)
+	podCopy.Spec.InitContainers = trimContainers(pod.Spec.InitContainers)
 	podCopy.Spec.Volumes = vols
 	podCopy.Spec.NodeName = ""
 	podCopy.Spec.SchedulerName = "default-scheduler"
